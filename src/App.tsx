@@ -3,6 +3,7 @@ import { useState } from "react";
 import TextPanel from "./components/TextPanel";
 import Canvas from "./components/Canvas";
 import Authors from "./components/Authors";
+import ControlPanel from "./components/ControlPanel";
 
 function App() {
   const [isTextPanelOpen, setIsTextPanelOpen] = useState(true);
@@ -18,6 +19,7 @@ function App() {
           <TextPanel isOpen={isTextPanelOpen} onToggle={handleTogglePanel} />
           <Canvas />
           <Authors />
+          <ControlPanel />
         </div>
       </div>
     </>
