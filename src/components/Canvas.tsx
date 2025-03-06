@@ -7,6 +7,7 @@ type ShaderParams = {
   TEMPERATURE: number;
   J: number;
   EVOLUTION_SPEED: number;
+  TOPOLOGY: number;
 };
 
 function Canvas() {
@@ -19,12 +20,13 @@ function Canvas() {
   const [shaderParams, setShaderParams] = useState<ShaderParams>({
     TEMPERATURE: 5.0,
     J: 1.0,
-    EVOLUTION_SPEED: 2.0
+    EVOLUTION_SPEED: 2.0,
+    TOPOLOGY: 0,
   });
 
   // Update function for shader parameters
   const updateShaderParams = (updates: Partial<ShaderParams>) => {
-    setShaderParams(prev => ({...prev, ...updates}));
+    setShaderParams((prev) => ({ ...prev, ...updates }));
   };
 
   // Expose update function to window for GUI interaction
@@ -73,6 +75,7 @@ function Canvas() {
       program,
       "EVOLUTION_SPEED"
     );
+    const topologyUniformLocation = gl.getUniformLocation(program, "TOPOLOGY");
 
     // Create a buffer to put positions in
     const positionBuffer = gl.createBuffer();
@@ -122,6 +125,7 @@ function Canvas() {
       gl.uniform1f(temperatureUniformLocation, shaderParams.TEMPERATURE);
       gl.uniform1f(jUniformLocation, shaderParams.J);
       gl.uniform1f(evolutionSpeedUniformLocation, shaderParams.EVOLUTION_SPEED);
+      gl.uniform1i(topologyUniformLocation, shaderParams.TOPOLOGY);
 
       // Set up position attribute
       gl.enableVertexAttribArray(positionAttributeLocation);
@@ -188,7 +192,6 @@ function Canvas() {
     return shader;
   }
 
-  // Helper function to create a program
   function createProgram(
     gl: WebGLRenderingContext,
     vertexShader: WebGLShader,

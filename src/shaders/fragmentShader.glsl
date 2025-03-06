@@ -6,8 +6,9 @@ uniform vec2 resolution;
 // Parameters for the Ising model
 uniform float TEMPERATURE ;      // Temperature parameter (higher = more randomness)
 uniform float J;                // Coupling constant (positive = ferromagnetic)
-const int GRID_SIZE = 128;           // Number of cells along the shorter dimension
+const int GRID_SIZE = 256;           // Number of cells along the shorter dimension
 uniform float EVOLUTION_SPEED;  // Speed of the simulation
+uniform int TOPOLOGY;
 
 // Hash function for pseudo-random number generation
 float hash(vec2 p) {
@@ -16,37 +17,126 @@ float hash(vec2 p) {
   return fract(p.x * p.y);
 }
 
-// Get spin state at grid position
-float getSpin(vec2 gridPos, float t) {
-  // Use position and time seed for randomized updates
-  float random = hash(gridPos + floor(t * EVOLUTION_SPEED));
+// Get a long-range connection based on position
+vec2 getLongRangeConnection(vec2 pos, vec2 size) {
+  // Use deterministic but seemingly random connection
+  float h = hash(pos * 43.21);
   
+  // Random offset between -size/3 and +size/3
+  vec2 offset = vec2(
+    (fract(h * 13.45) - 0.5) * 2.0 * (size.x / 3.0),
+    (fract(h * 31.45) - 0.5) * 2.0 * (size.y / 3.0)
+  );
+  
+  // Ensure we're not connecting to immediate neighbors
+  if (abs(offset.x) < 2.0) offset.x = sign(offset.x) * 2.0;
+  if (abs(offset.y) < 2.0) offset.y = sign(offset.y) * 2.0;
+  
+  // Apply offset and wrap around grid boundaries
+  return vec2(
+    mod(pos.x + offset.x, size.x),
+    mod(pos.y + offset.y, size.y)
+  );
+}
+
+// Get spin value at a specific position
+float getSpinAt(vec2 pos, vec2 size) {
   // Get deterministic spin state based on grid position
-  float spinSeed = hash(gridPos);
-  float spin = step(0.5, spinSeed) * 2.0 - 1.0;
+  float spinSeed = hash(pos);
+  return step(0.5, spinSeed) * 2.0 - 1.0;
+}
+
+// Get spin state at grid position
+float getSpin(vec2 gridPos, float t, vec2 size) {
+  float random = hash(gridPos + floor(t * EVOLUTION_SPEED));
+  float spin = getSpinAt(gridPos, size);
+  float neighborSum = 0.0;
   
-  // Get neighboring spins with periodic boundary conditions
-  vec2 size = vec2(float(GRID_SIZE));
-  if (resolution.x > resolution.y) {
-    // Landscape mode - more cells horizontally
-    size.x = float(GRID_SIZE) * (resolution.x / resolution.y);
-  } else {
-    // Portrait mode - more cells vertically
-    size.y = float(GRID_SIZE) * (resolution.y / resolution.x);
+  if (TOPOLOGY == 0) {
+    // Regular grid (4 neighbors)
+    vec2 right = vec2(mod(gridPos.x + 1.0, size.x), gridPos.y);
+    vec2 left = vec2(mod(gridPos.x - 1.0 + size.x, size.x), gridPos.y);
+    vec2 up = vec2(gridPos.x, mod(gridPos.y + 1.0, size.y));
+    vec2 down = vec2(gridPos.x, mod(gridPos.y - 1.0 + size.y, size.y));
+    
+    neighborSum += getSpinAt(right, size);
+    neighborSum += getSpinAt(left, size);
+    neighborSum += getSpinAt(up, size);
+    neighborSum += getSpinAt(down, size);
+  } 
+  else if (TOPOLOGY == 1) {
+    // Triangular lattice (6 neighbors)
+    vec2 right = vec2(mod(gridPos.x + 1.0, size.x), gridPos.y);
+    vec2 left = vec2(mod(gridPos.x - 1.0 + size.x, size.x), gridPos.y);
+    vec2 up = vec2(gridPos.x, mod(gridPos.y + 1.0, size.y));
+    vec2 down = vec2(gridPos.x, mod(gridPos.y - 1.0 + size.y, size.y));
+    vec2 upRight = vec2(mod(gridPos.x + 1.0, size.x), mod(gridPos.y + 1.0, size.y));
+    vec2 downLeft = vec2(mod(gridPos.x - 1.0 + size.x, size.x), mod(gridPos.y - 1.0 + size.y, size.y));
+    
+    neighborSum += getSpinAt(right, size);
+    neighborSum += getSpinAt(left, size);
+    neighborSum += getSpinAt(up, size);
+    neighborSum += getSpinAt(down, size);
+    neighborSum += getSpinAt(upRight, size);
+    neighborSum += getSpinAt(downLeft, size);
+  }
+  else if (TOPOLOGY == 2) {
+    // Hexagonal lattice (3 neighbors)
+    // For even rows: right, up-right, down-right
+    // For odd rows: left, up-left, down-left
+    bool isEvenRow = mod(gridPos.y, 2.0) < 1.0;
+    
+    if (isEvenRow) {
+      vec2 right = vec2(mod(gridPos.x + 1.0, size.x), gridPos.y);
+      vec2 upRight = vec2(mod(gridPos.x + 1.0, size.x), mod(gridPos.y + 1.0, size.y));
+      vec2 downRight = vec2(mod(gridPos.x + 1.0, size.x), mod(gridPos.y - 1.0 + size.y, size.y));
+      
+      neighborSum += getSpinAt(right, size);
+      neighborSum += getSpinAt(upRight, size);
+      neighborSum += getSpinAt(downRight, size);
+    } else {
+      vec2 left = vec2(mod(gridPos.x - 1.0 + size.x, size.x), gridPos.y);
+      vec2 upLeft = vec2(mod(gridPos.x - 1.0 + size.x, size.x), mod(gridPos.y + 1.0, size.y));
+      vec2 downLeft = vec2(mod(gridPos.x - 1.0 + size.x, size.x), mod(gridPos.y - 1.0 + size.y, size.y));
+      
+      neighborSum += getSpinAt(left, size);
+      neighborSum += getSpinAt(upLeft, size);
+      neighborSum += getSpinAt(downLeft, size);
+    }
+  }
+  else if (TOPOLOGY == 3) {
+    // Small-world network (4 regular + 1 long-range connection)
+    vec2 right = vec2(mod(gridPos.x + 1.0, size.x), gridPos.y);
+    vec2 left = vec2(mod(gridPos.x - 1.0 + size.x, size.x), gridPos.y);
+    vec2 up = vec2(gridPos.x, mod(gridPos.y + 1.0, size.y));
+    vec2 down = vec2(gridPos.x, mod(gridPos.y - 1.0 + size.y, size.y));
+    vec2 longRange = getLongRangeConnection(gridPos, size);
+    
+    neighborSum += getSpinAt(right, size);
+    neighborSum += getSpinAt(left, size);
+    neighborSum += getSpinAt(up, size);
+    neighborSum += getSpinAt(down, size);
+    neighborSum += getSpinAt(longRange, size);
+  }
+  else if (TOPOLOGY == 4) {
+    // Random graph (5 random connections)
+    for (int i = 0; i < 5; i++) {
+      float h = hash(gridPos + vec2(float(i) * 10.0, float(i) * 5.0));
+      float angle = h * 6.28318;
+      float dist = 1.0 + floor(hash(gridPos + vec2(0.0, float(i))) * 5.0);
+      
+      vec2 offset = vec2(cos(angle), sin(angle)) * dist;
+      vec2 neighbor = vec2(
+        mod(gridPos.x + offset.x + size.x, size.x),
+        mod(gridPos.y + offset.y + size.y, size.y)
+      );
+      
+      neighborSum += getSpinAt(neighbor, size);
+    }
   }
   
-  vec2 right = vec2(mod(gridPos.x + 1.0, size.x), gridPos.y);
-  vec2 left = vec2(mod(gridPos.x - 1.0 + size.x, size.x), gridPos.y);
-  vec2 up = vec2(gridPos.x, mod(gridPos.y + 1.0, size.y));
-  vec2 down = vec2(gridPos.x, mod(gridPos.y - 1.0 + size.y, size.y));
-  
-  float neighbor1 = step(0.5, hash(right)) * 2.0 - 1.0;
-  float neighbor2 = step(0.5, hash(left)) * 2.0 - 1.0;
-  float neighbor3 = step(0.5, hash(up)) * 2.0 - 1.0;
-  float neighbor4 = step(0.5, hash(down)) * 2.0 - 1.0;
-  
   // Calculate local energy (negative sum of neighboring spins * current spin * J)
-  float energy = -J * spin * (neighbor1 + neighbor2 + neighbor3 + neighbor4);
+  float energy = -J * spin * neighborSum;
   
   // Try a spin flip
   float flippedEnergy = -energy;
@@ -84,15 +174,23 @@ void main() {
   vec2 gridPos = floor(vec2(st.x * numCells.x, st.y * numCells.y));
   
   // Get spin at current grid position
-  float spin = getSpin(gridPos, time);
+  float spin = getSpin(gridPos, time, numCells);
   
-  // Create a color scheme
-  vec3 spinColor = vec3(spin * 0.5 + 0.5);
-  vec3 color = mix(
-    vec3(0.0, 0.0, 0.0),  // Color for spin down (-1)
-    vec3(1.0, 1.0, 1.0),  // Color for spin up (+1)
-    spinColor.r
-  );
+  vec3 upColor, downColor;
+
+  upColor = vec3(1.0, 1.0, 1.0);
+  downColor = vec3(0.0, 0.0, 0.0);
+  
+  // Apply spin color
+  vec3 color = mix(downColor, upColor, spin * 0.5 + 0.5);
+  
+  // Visualize hexagonal pattern for hexagonal lattice (subtle effect)
+  if (TOPOLOGY == 2) {
+    // Add subtle hexagonal pattern
+    bool isEvenRow = mod(gridPos.y, 2.0) < 1.0;
+    float hexFactor = isEvenRow ? 0.05 : -0.05;
+    color *= 1.0 + hexFactor;
+  }
   
   gl_FragColor = vec4(color, 1.0);
 }
