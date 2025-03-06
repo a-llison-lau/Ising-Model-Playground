@@ -4,10 +4,10 @@ uniform float time;
 uniform vec2 resolution;
 
 // Parameters for the Ising model
-const float TEMPERATURE = 5.0;      // Temperature parameter (higher = more randomness)
-const float J = 1.0;                // Coupling constant (positive = ferromagnetic)
+uniform float TEMPERATURE ;      // Temperature parameter (higher = more randomness)
+uniform float J;                // Coupling constant (positive = ferromagnetic)
 const int GRID_SIZE = 128;           // Number of cells along the shorter dimension
-const float EVOLUTION_SPEED = 2.0;  // Speed of the simulation
+uniform float EVOLUTION_SPEED;  // Speed of the simulation
 
 // Hash function for pseudo-random number generation
 float hash(vec2 p) {

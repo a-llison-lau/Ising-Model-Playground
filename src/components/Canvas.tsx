@@ -1,10 +1,36 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import vertexShaderSource from "../shaders/vertexShader.glsl?raw";
 import fragmentShaderSource from "../shaders/fragmentShader.glsl?raw";
+
+// Define a type for shader parameters
+type ShaderParams = {
+  TEMPERATURE: number;
+  J: number;
+  EVOLUTION_SPEED: number;
+};
 
 function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameId = useRef<number>(0);
+  const glContextRef = useRef<WebGLRenderingContext | null>(null);
+  const programRef = useRef<WebGLProgram | null>(null);
+
+  // State to manage shader parameters
+  const [shaderParams, setShaderParams] = useState<ShaderParams>({
+    TEMPERATURE: 5.0,
+    J: 1.0,
+    EVOLUTION_SPEED: 2.0
+  });
+
+  // Update function for shader parameters
+  const updateShaderParams = (updates: Partial<ShaderParams>) => {
+    setShaderParams(prev => ({...prev, ...updates}));
+  };
+
+  // Expose update function to window for GUI interaction
+  useEffect(() => {
+    (window as any).updateShaderParams = updateShaderParams;
+  }, []);
 
   // Initialize WebGL
   useEffect(() => {
@@ -17,6 +43,7 @@ function Canvas() {
       console.error("WebGL not supported");
       return;
     }
+    glContextRef.current = gl;
 
     // Create shader program
     const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
@@ -26,6 +53,7 @@ function Canvas() {
       fragmentShaderSource
     );
     const program = createProgram(gl, vertexShader, fragmentShader);
+    programRef.current = program;
 
     // Look up where the vertex data needs to go
     const positionAttributeLocation = gl.getAttribLocation(program, "position");
@@ -35,6 +63,15 @@ function Canvas() {
     const resolutionUniformLocation = gl.getUniformLocation(
       program,
       "resolution"
+    );
+    const temperatureUniformLocation = gl.getUniformLocation(
+      program,
+      "TEMPERATURE"
+    );
+    const jUniformLocation = gl.getUniformLocation(program, "J");
+    const evolutionSpeedUniformLocation = gl.getUniformLocation(
+      program,
+      "EVOLUTION_SPEED"
     );
 
     // Create a buffer to put positions in
@@ -81,6 +118,11 @@ function Canvas() {
       // Use our shader program
       gl.useProgram(program);
 
+      // Set shader parameters as uniforms
+      gl.uniform1f(temperatureUniformLocation, shaderParams.TEMPERATURE);
+      gl.uniform1f(jUniformLocation, shaderParams.J);
+      gl.uniform1f(evolutionSpeedUniformLocation, shaderParams.EVOLUTION_SPEED);
+
       // Set up position attribute
       gl.enableVertexAttribArray(positionAttributeLocation);
       gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -120,7 +162,7 @@ function Canvas() {
         gl.deleteBuffer(positionBuffer);
       }
     };
-  }, []);
+  }, [shaderParams]);
 
   // Helper function to create a shader
   function createShader(
