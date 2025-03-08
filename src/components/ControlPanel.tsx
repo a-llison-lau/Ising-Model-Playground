@@ -25,9 +25,9 @@ function ControlPanel() {
 
       // Add controls for shader parameters
       const params = {
-        TEMPERATURE: 5.0,
+        TEMPERATURE: 0.5,
         J: 1.0,
-        EVOLUTION_SPEED: 2.0,
+        EVOLUTION_SPEED: 0.5,
         TOPOLOGY: 0,
         // Use a separate property for the dropdown menu
         topologyOption: "Regular grid (4 neighbors)" as TopologyOptionKey,
