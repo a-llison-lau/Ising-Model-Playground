@@ -156,16 +156,13 @@ float evolveSpin(vec2 pos, vec2 size, float timeSeed) {
   // Get sum of neighboring spins
   float neighborSum = getNeighborSum(pos, size);
   
-  // Calculate current energy: -J * spin * sum of neighbor spins
+  // Calculate current energy
   float currentEnergy = -J * currentSpin * neighborSum;
   
-  // Calculate energy if spin were flipped: J * spin * sum of neighbor spins
+  // Energy if spin were flipped
   float flippedEnergy = J * currentSpin * neighborSum;
   
-  // Calculate energy difference (flipped - current)
   float energyDiff = flippedEnergy - currentEnergy;
-  
-  // Random number for Metropolis acceptance
   float r = random(pos, timeSeed);
   
   // Metropolis algorithm: always accept if energy decreases, otherwise accept with probability e^(-ΔE/T)

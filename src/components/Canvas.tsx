@@ -45,13 +45,61 @@ function Canvas() {
     (window as any).updateShaderParams = updateShaderParams;
   }, []);
 
+  // Helper function to create a shader
+  const createShader = (
+    gl: WebGLRenderingContext,
+    type: number,
+    source: string
+  ) => {
+    const shader = gl.createShader(type);
+    if (!shader) throw new Error("Could not create shader");
+
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+
+    const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+    if (!success) {
+      console.error(gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      throw new Error("Could not compile shader");
+    }
+
+    return shader;
+  };
+
+  // Helper function to create a program
+  const createProgram = (
+    gl: WebGLRenderingContext,
+    vertexShader: WebGLShader,
+    fragmentShader: WebGLShader
+  ) => {
+    const program = gl.createProgram();
+    if (!program) throw new Error("Could not create program");
+
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+    if (!success) {
+      console.error(gl.getProgramInfoLog(program));
+      gl.deleteProgram(program);
+      throw new Error("Could not link program");
+    }
+
+    return program;
+  };
+
   // Initialize WebGL
-  useEffect(() => {
+  const initializeWebGL = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     // Get WebGL context
-    const gl = canvas.getContext("webgl");
+    const gl = canvas.getContext("webgl", {
+      preserveDrawingBuffer: true,
+      antialias: false, // Disable antialiasing for performance
+    });
     if (!gl) {
       console.error("WebGL not supported");
       return;
@@ -94,6 +142,10 @@ function Canvas() {
 
     // Create a buffer to put positions in
     const positionBuffer = gl.createBuffer();
+    if (!positionBuffer) {
+      console.error("Failed to create position buffer");
+      return;
+    }
 
     // Bind it to ARRAY_BUFFER
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -137,6 +189,10 @@ function Canvas() {
       // Create two textures
       const texture1 = gl.createTexture();
       const texture2 = gl.createTexture();
+      if (!texture1 || !texture2) {
+        console.error("Failed to create textures");
+        return;
+      }
 
       // Configure both textures
       [texture1, texture2].forEach((texture) => {
@@ -160,10 +216,10 @@ function Canvas() {
         );
       });
 
-      // Initialize texture1 with random black and white noise
+      // Initialize texture1 with random spins (0 or 255)
       const data = new Uint8Array(width * height * 4);
       for (let i = 0; i < width * height; i++) {
-        const value = Math.random() > 0.5 ? 255 : 0;
+        const value = Math.random() > 0.5 ? 255 : 0; // Random spin (0 or 255)
         data[i * 4] = value; // R
         data[i * 4 + 1] = value; // G
         data[i * 4 + 2] = value; // B
@@ -185,6 +241,10 @@ function Canvas() {
       // Create two framebuffers
       const framebuffer1 = gl.createFramebuffer();
       const framebuffer2 = gl.createFramebuffer();
+      if (!framebuffer1 || !framebuffer2) {
+        console.error("Failed to create framebuffers");
+        return;
+      }
 
       // Attach texture1 to framebuffer1
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer1);
@@ -205,6 +265,10 @@ function Canvas() {
         texture2,
         0
       );
+
+      // Explicitly initialize the textures by clearing the framebuffers
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
       // Store references to framebuffers and textures
       fbRef.current = [framebuffer1, framebuffer2];
@@ -242,11 +306,11 @@ function Canvas() {
       gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
       gl.vertexAttribPointer(
         positionAttributeLocation,
-        2, // 2 components per iteration
-        gl.FLOAT, // the data is 32bit floats
-        false, // don't normalize the data
-        0, // 0 = move forward size * sizeof(type) each iteration to get the next position
-        0 // start at the beginning of the buffer
+        2,
+        gl.FLOAT,
+        false,
+        0,
+        0
       );
 
       // Set uniforms
@@ -286,6 +350,9 @@ function Canvas() {
       window.removeEventListener("resize", resizeCanvas);
       cancelAnimationFrame(animationFrameId.current);
 
+      // Ensure no pending frames are left
+      gl.finish();
+
       // Clean up WebGL resources
       if (gl) {
         gl.deleteProgram(program);
@@ -300,55 +367,37 @@ function Canvas() {
         if (fbRef.current[1]) gl.deleteFramebuffer(fbRef.current[1]);
       }
     };
+  };
+
+  // Handle WebGL context loss and restoration
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      console.warn("WebGL context lost");
+      cancelAnimationFrame(animationFrameId.current);
+    };
+
+    const handleContextRestored = () => {
+      console.log("WebGL context restored");
+      initializeWebGL();
+    };
+
+    canvas.addEventListener("webglcontextlost", handleContextLost);
+    canvas.addEventListener("webglcontextrestored", handleContextRestored);
+
+    return () => {
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
+      canvas.removeEventListener("webglcontextrestored", handleContextRestored);
+    };
+  }, []);
+
+  // Initialize WebGL on mount
+  useEffect(() => {
+    initializeWebGL();
   }, [shaderParams]);
-
-  // Helper function to create a shader
-  function createShader(
-    gl: WebGLRenderingContext,
-    type: number,
-    source: string
-  ) {
-    const shader = gl.createShader(type);
-    if (!shader) {
-      throw new Error("Could not create shader");
-    }
-
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-
-    const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
-    if (!success) {
-      console.error(gl.getShaderInfoLog(shader));
-      gl.deleteShader(shader);
-      throw new Error("Could not compile shader");
-    }
-
-    return shader;
-  }
-
-  function createProgram(
-    gl: WebGLRenderingContext,
-    vertexShader: WebGLShader,
-    fragmentShader: WebGLShader
-  ) {
-    const program = gl.createProgram();
-    if (!program) {
-      throw new Error("Could not create program");
-    }
-
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-
-    const success = gl.getProgramParameter(program, gl.LINK_STATUS);
-    if (!success) {
-      console.error(gl.getProgramInfoLog(program));
-      gl.deleteProgram(program);
-      throw new Error("Could not link program");
-    }
-
-    return program;
-  }
 
   return (
     <div

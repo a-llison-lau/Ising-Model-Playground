@@ -35,17 +35,17 @@ function ControlPanel() {
 
       // Add sliders for each parameter with sensible ranges
       gui
-        .add(params, "TEMPERATURE", 0, 10)
+        .add(params, "TEMPERATURE", 0, 5)
         .onChange((value: number) => updateShaderParams({ TEMPERATURE: value }))
         .name("Temperature");
 
       gui
-        .add(params, "J", 0, 5)
+        .add(params, "J", 0, 3)
         .onChange((value: number) => updateShaderParams({ J: value }))
         .name("Coupling Strength");
 
       gui
-        .add(params, "EVOLUTION_SPEED", 0, 5)
+        .add(params, "EVOLUTION_SPEED", 0, 2)
         .onChange((value: number) =>
           updateShaderParams({ EVOLUTION_SPEED: value })
         )
