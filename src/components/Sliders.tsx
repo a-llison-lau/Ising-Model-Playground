@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+
 interface SlidersProps {
   onParameterChange?: (params: {
     temperature: number;
