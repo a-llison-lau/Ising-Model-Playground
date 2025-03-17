@@ -1,21 +1,20 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import vertexShaderSource from "../shaders/vert.glsl?raw";
 import fragmentShaderSource from "../shaders/frag.glsl?raw";
+import Sliders from "./Sliders";
 
 interface IsingModelSimulationProps {
-  width?: number;
-  height?: number;
-  coupling?: number;
-  field?: number;
-  temperature?: number;
-  speed?: number;
+  initialCoupling?: number;
+  initialField?: number;
+  initialTemperature?: number;
+  initialSpeed?: number;
 }
 
 const IsingModelSimulation: React.FC<IsingModelSimulationProps> = ({
-  coupling = 1.0,
-  field = 0.0,
-  temperature = 2.27,
-  speed = 0.5,
+  initialCoupling = 1.0,
+  initialField = 0.0,
+  initialTemperature = 2.27,
+  initialSpeed = 0.5,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | null>(null);
@@ -24,12 +23,34 @@ const IsingModelSimulation: React.FC<IsingModelSimulationProps> = ({
   const glRef = useRef<WebGLRenderingContext | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
 
+  const [coupling, setCoupling] = useState(initialCoupling);
+  const [field, setField] = useState(initialField);
+  const [temperature, setTemperature] = useState(initialTemperature);
+  const [speed, setSpeed] = useState(initialSpeed);
+
   interface TextureData {
     textures: WebGLTexture[];
     framebuffers: WebGLFramebuffer[];
   }
 
   const texturesRef = useRef<TextureData>({ textures: [], framebuffers: [] });
+
+  const handleParameterChange = ({
+    temperature: newTemperature,
+    field: newField,
+    coupling: newCoupling,
+    speed: newSpeed,
+  }: {
+    temperature: number;
+    field: number;
+    coupling: number;
+    speed: number;
+  }) => {
+    setTemperature(newTemperature);
+    setField(newField);
+    setCoupling(newCoupling);
+    setSpeed(newSpeed);
+  };
 
   // Initialize WebGL
   const initWebGL = (): boolean => {
@@ -251,6 +272,7 @@ const IsingModelSimulation: React.FC<IsingModelSimulationProps> = ({
       const u_resolution = gl.getUniformLocation(program, "u_resolution");
       gl.uniform2f(u_resolution, displayWidth, displayHeight);
 
+      // Use current state values directly from component state
       const u_coupling = gl.getUniformLocation(program, "u_coupling");
       gl.uniform1f(u_coupling, coupling);
 
@@ -331,12 +353,21 @@ const IsingModelSimulation: React.FC<IsingModelSimulationProps> = ({
   }, []);
 
   return (
-    <div
-      className="fixed top-0 right-0 h-full w-full bg-zinc-100 text-left"
-      style={{ zIndex: 0 }}
-    >
-      <canvas ref={canvasRef} className="w-full h-full" />
-    </div>
+    <>
+      <div
+        className="fixed top-0 right-0 h-full w-full bg-zinc-100 text-left"
+        style={{ zIndex: 0 }}
+      >
+        <canvas ref={canvasRef} className="w-full h-full" />
+      </div>
+      <Sliders
+        onParameterChange={handleParameterChange}
+        initialTemperature={temperature}
+        initialField={field}
+        initialCoupling={coupling}
+        initialSpeed={speed}
+      />
+    </>
   );
 };
 

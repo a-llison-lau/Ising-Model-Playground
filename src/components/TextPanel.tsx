@@ -1,5 +1,4 @@
 import { MathJax, MathJaxContext } from "better-react-mathjax";
-import { BsArrowLeftCircle, BsArrowBarRight } from "react-icons/bs";
 import { useEffect, useState } from "react";
 import { ContentNode } from "../types/types";
 import { parseMarkdown } from "../utils/parseMarkdown";
@@ -19,12 +18,6 @@ const config = {
     ],
   },
 };
-
-// Handle collapse and expand
-interface TextPanelProps {
-  isOpen: boolean;
-  onToggle: () => void;
-}
 
 const RenderContent = ({ node }: { node: ContentNode }) => {
   switch (node.type) {
@@ -128,7 +121,7 @@ const RenderContent = ({ node }: { node: ContentNode }) => {
   }
 };
 
-function TextPanel({ isOpen, onToggle }: TextPanelProps) {
+function TextPanel() {
   const [content, setContent] = useState<ContentNode[]>([]);
 
   useEffect(() => {
@@ -143,41 +136,18 @@ function TextPanel({ isOpen, onToggle }: TextPanelProps) {
 
   return (
     <div className="relative">
-      {!isOpen && (
-        <div
-          className="fixed top-4 left-4 text-3xl cursor-pointer z-20 block"
-          onClick={onToggle}
-        >
-          <BsArrowBarRight />
-        </div>
-      )}
-
       <div
-        className={`relative text-black p-4 h-full overflow-x-hidden overflow-y-auto rounded-lg shadow-lg transform transition-all duration-1000 ease-in-out bg-white ${
-          isOpen ? "translate-x-0 md:w-1/3" : "-translate-x-full w-0"
-        }`}
+        className="relative text-black p-4 h-full overflow-x-hidden overflow-y-auto bg-white md:w-2/7"
         style={{
-          height: "92vh",
-          boxShadow: "6px 6px 17px 2px rgba(182, 182, 182, 0.5)",
+          height: "100vh",
           zIndex: 15,
         }}
       >
-        {isOpen && (
-          <MathJaxContext version={3} config={config}>
-            {/* Collapse button */}
-            {isOpen && (
-              <div
-                className="absolute top-5 right-4 text-2xl cursor-pointer z-20"
-                onClick={onToggle}
-              >
-                <BsArrowLeftCircle />
-              </div>
-            )}
-            {content.map((node, index) => (
-              <RenderContent key={index} node={node} />
-            ))}
-          </MathJaxContext>
-        )}
+        <MathJaxContext version={3} config={config}>
+          {content.map((node, index) => (
+            <RenderContent key={index} node={node} />
+          ))}
+        </MathJaxContext>
       </div>
     </div>
   );
