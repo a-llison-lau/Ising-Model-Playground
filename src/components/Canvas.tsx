@@ -1,231 +1,165 @@
-import { useEffect, useRef, useState } from "react";
-import vertexShaderSource from "../shaders/vertexShader.glsl?raw";
-import fragmentShaderSource from "../shaders/fragmentShader.glsl?raw";
+import React, { useEffect, useRef } from "react";
+import vertexShaderSource from "../shaders/vert.glsl?raw";
+import fragmentShaderSource from "../shaders/frag.glsl?raw";
 
-// Define a type for shader parameters
-type ShaderParams = {
-  TEMPERATURE: number;
-  J: number;
-  EVOLUTION_SPEED: number;
-  TOPOLOGY: number;
-};
+interface IsingModelSimulationProps {
+  width?: number;
+  height?: number;
+  coupling?: number;
+  field?: number;
+  temperature?: number;
+  speed?: number;
+}
 
-function Canvas() {
+const IsingModelSimulation: React.FC<IsingModelSimulationProps> = ({
+  coupling = 1.0,
+  field = 0.0,
+  temperature = 2.27,
+  speed = 0.5,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationFrameId = useRef<number>(0);
-  const glContextRef = useRef<WebGLRenderingContext | null>(null);
+  const requestRef = useRef<number | null>(null);
+  const previousTimeRef = useRef<number>(0);
+  const iterationRef = useRef<number>(0);
+  const glRef = useRef<WebGLRenderingContext | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
 
-  // Ping-pong buffers and textures
-  const fbRef = useRef<[WebGLFramebuffer | null, WebGLFramebuffer | null]>([
-    null,
-    null,
-  ]);
-  const textureRef = useRef<[WebGLTexture | null, WebGLTexture | null]>([
-    null,
-    null,
-  ]);
-  const currentBufferRef = useRef<number>(0);
+  interface TextureData {
+    textures: WebGLTexture[];
+    framebuffers: WebGLFramebuffer[];
+  }
 
-  // State to manage shader parameters
-  const [shaderParams, setShaderParams] = useState<ShaderParams>({
-    TEMPERATURE: 0.5, // Adjusted for better phase transitions
-    J: 1.0,
-    EVOLUTION_SPEED: 0.5,
-    TOPOLOGY: 0,
-  });
-
-  // Update function for shader parameters
-  const updateShaderParams = (updates: Partial<ShaderParams>) => {
-    setShaderParams((prev) => ({ ...prev, ...updates }));
-  };
-
-  // Expose update function to window for GUI interaction
-  useEffect(() => {
-    (window as any).updateShaderParams = updateShaderParams;
-  }, []);
-
-  // Helper function to create a shader
-  const createShader = (
-    gl: WebGLRenderingContext,
-    type: number,
-    source: string
-  ) => {
-    const shader = gl.createShader(type);
-    if (!shader) throw new Error("Could not create shader");
-
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-
-    const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
-    if (!success) {
-      console.error(gl.getShaderInfoLog(shader));
-      gl.deleteShader(shader);
-      throw new Error("Could not compile shader");
-    }
-
-    return shader;
-  };
-
-  // Helper function to create a program
-  const createProgram = (
-    gl: WebGLRenderingContext,
-    vertexShader: WebGLShader,
-    fragmentShader: WebGLShader
-  ) => {
-    const program = gl.createProgram();
-    if (!program) throw new Error("Could not create program");
-
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-
-    const success = gl.getProgramParameter(program, gl.LINK_STATUS);
-    if (!success) {
-      console.error(gl.getProgramInfoLog(program));
-      gl.deleteProgram(program);
-      throw new Error("Could not link program");
-    }
-
-    return program;
-  };
+  const texturesRef = useRef<TextureData>({ textures: [], framebuffers: [] });
 
   // Initialize WebGL
-  const initializeWebGL = () => {
+  const initWebGL = (): boolean => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return false;
 
-    // Get WebGL context
-    const gl = canvas.getContext("webgl", {
-      preserveDrawingBuffer: true,
-      antialias: false, // Disable antialiasing for performance
-    });
+    const gl = canvas.getContext("webgl", { preserveDrawingBuffer: true });
+
     if (!gl) {
       console.error("WebGL not supported");
-      return;
+      return false;
     }
-    glContextRef.current = gl;
 
-    // Create shader program
+    // Get the device pixel ratio
+    const dpr = window.devicePixelRatio || 1;
+
+    const displayWidth = Math.floor(canvas.clientWidth * dpr);
+    const displayHeight = Math.floor(canvas.clientHeight * dpr);
+
+    canvas.width = displayWidth;
+    canvas.height = displayHeight;
+
+    glRef.current = gl;
+
     const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
     const fragmentShader = createShader(
       gl,
       gl.FRAGMENT_SHADER,
       fragmentShaderSource
     );
+
+    if (!vertexShader || !fragmentShader) return false;
+
     const program = createProgram(gl, vertexShader, fragmentShader);
+    if (!program) return false;
+
     programRef.current = program;
 
-    // Look up where the vertex data needs to go
-    const positionAttributeLocation = gl.getAttribLocation(program, "position");
-
-    // Look up uniform locations
-    const timeUniformLocation = gl.getUniformLocation(program, "time");
-    const resolutionUniformLocation = gl.getUniformLocation(
-      program,
-      "resolution"
-    );
-    const temperatureUniformLocation = gl.getUniformLocation(
-      program,
-      "TEMPERATURE"
-    );
-    const jUniformLocation = gl.getUniformLocation(program, "J");
-    const evolutionSpeedUniformLocation = gl.getUniformLocation(
-      program,
-      "EVOLUTION_SPEED"
-    );
-    const topologyUniformLocation = gl.getUniformLocation(program, "TOPOLOGY");
-    const previousStateLocation = gl.getUniformLocation(
-      program,
-      "previousState"
-    );
-
-    // Create a buffer to put positions in
     const positionBuffer = gl.createBuffer();
-    if (!positionBuffer) {
-      console.error("Failed to create position buffer");
-      return;
-    }
-
-    // Bind it to ARRAY_BUFFER
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 
-    // Set geometry - just a simple full-screen quad (2 triangles)
-    const positions = [
-      -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0,
-    ];
+    // Quad covering the entire clip space
+    const positions = [-1, -1, 1, -1, -1, 1, 1, 1];
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
 
-    // Resize canvas and viewport
-    const resizeCanvas = () => {
-      const displayWidth = canvas.clientWidth;
-      const displayHeight = canvas.clientHeight;
+    // Initialize textures for ping-pong rendering
+    initTextures(gl, displayWidth, displayHeight);
 
-      // Check if the canvas is not the same size
-      if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-        canvas.width = displayWidth;
-        canvas.height = displayHeight;
+    return true;
+  };
 
-        // Update the viewport
-        gl.viewport(0, 0, canvas.width, canvas.height);
+  const createShader = (
+    gl: WebGLRenderingContext,
+    type: number,
+    source: string
+  ): WebGLShader | null => {
+    const shader = gl.createShader(type);
+    if (!shader) return null;
 
-        // Recreate ping-pong buffers and textures when canvas size changes
-        createPingPongBuffers(gl, canvas.width, canvas.height);
-      }
-    };
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
 
-    // Create ping-pong buffers and textures
-    const createPingPongBuffers = (
-      gl: WebGLRenderingContext,
-      width: number,
-      height: number
-    ) => {
-      // Clean up existing textures and framebuffers
-      if (textureRef.current[0]) gl.deleteTexture(textureRef.current[0]);
-      if (textureRef.current[1]) gl.deleteTexture(textureRef.current[1]);
-      if (fbRef.current[0]) gl.deleteFramebuffer(fbRef.current[0]);
-      if (fbRef.current[1]) gl.deleteFramebuffer(fbRef.current[1]);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error("Shader compilation error:", gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
 
-      // Create two textures
-      const texture1 = gl.createTexture();
-      const texture2 = gl.createTexture();
-      if (!texture1 || !texture2) {
-        console.error("Failed to create textures");
-        return;
-      }
+    return shader;
+  };
 
-      // Configure both textures
-      [texture1, texture2].forEach((texture) => {
-        gl.bindTexture(gl.TEXTURE_2D, texture);
+  // Link shaders into a program
+  const createProgram = (
+    gl: WebGLRenderingContext,
+    vertexShader: WebGLShader,
+    fragmentShader: WebGLShader
+  ): WebGLProgram | null => {
+    const program = gl.createProgram();
+    if (!program) return null;
+
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error("Program linking error:", gl.getProgramInfoLog(program));
+      return null;
+    }
+
+    return program;
+  };
+
+  // Initialize textures for ping-pong rendering
+  const initTextures = (
+    gl: WebGLRenderingContext,
+    width: number,
+    height: number
+  ): void => {
+    const textures: WebGLTexture[] = [];
+    const framebuffers: WebGLFramebuffer[] = [];
+
+    // Use either power-of-two dimensions or CLAMP_TO_EDGE
+    const isPowerOf2Width = (width & (width - 1)) === 0;
+    const isPowerOf2Height = (height & (height - 1)) === 0;
+    const isPowerOf2 = isPowerOf2Width && isPowerOf2Height;
+
+    for (let i = 0; i < 2; i++) {
+      const texture = gl.createTexture();
+      if (!texture) continue;
+
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+
+      // For non-power-of-2 textures, must use CLAMP_TO_EDGE
+      if (!isPowerOf2) {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-
-        // Allocate texture memory
-        gl.texImage2D(
-          gl.TEXTURE_2D,
-          0,
-          gl.RGBA,
-          width,
-          height,
-          0,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          null
-        );
-      });
-
-      // Initialize texture1 with random spins (0 or 255)
-      const data = new Uint8Array(width * height * 4);
-      for (let i = 0; i < width * height; i++) {
-        const value = Math.random() > 0.5 ? 255 : 0; // Random spin (0 or 255)
-        data[i * 4] = value; // R
-        data[i * 4 + 1] = value; // G
-        data[i * 4 + 2] = value; // B
-        data[i * 4 + 3] = 255; // A
+      } else {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
       }
-      gl.bindTexture(gl.TEXTURE_2D, texture1);
+
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+      // Create random initial state for the simulation
+      const data = new Uint8Array(width * height * 4);
+      for (let j = 0; j < data.length; j++) {
+        data[j] = Math.random() > 0.5 ? 255 : 0;
+      }
+
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
@@ -238,166 +172,163 @@ function Canvas() {
         data
       );
 
-      // Create two framebuffers
-      const framebuffer1 = gl.createFramebuffer();
-      const framebuffer2 = gl.createFramebuffer();
-      if (!framebuffer1 || !framebuffer2) {
-        console.error("Failed to create framebuffers");
-        return;
-      }
+      // Create a framebuffer for this texture
+      const fbo = gl.createFramebuffer();
+      if (!fbo) continue;
 
-      // Attach texture1 to framebuffer1
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer1);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.framebufferTexture2D(
         gl.FRAMEBUFFER,
         gl.COLOR_ATTACHMENT0,
         gl.TEXTURE_2D,
-        texture1,
+        texture,
         0
       );
 
-      // Attach texture2 to framebuffer2
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer2);
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        gl.TEXTURE_2D,
-        texture2,
-        0
-      );
+      textures.push(texture);
+      framebuffers.push(fbo);
+    }
 
-      // Explicitly initialize the textures by clearing the framebuffers
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-      // Store references to framebuffers and textures
-      fbRef.current = [framebuffer1, framebuffer2];
-      textureRef.current = [texture1, texture2];
-
-      // Reset current buffer index
-      currentBufferRef.current = 0;
-    };
-
-    // Add resize listener
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
-
-    // Animation function
-    const startTime = performance.now();
-    const render = () => {
-      // Calculate time
-      const time = (performance.now() - startTime) / 1000;
-
-      // Use our shader program
-      gl.useProgram(program);
-
-      // Get current and next buffer indices
-      const currentIdx = currentBufferRef.current;
-      const nextIdx = 1 - currentIdx;
-
-      // Set shader parameters as uniforms
-      gl.uniform1f(temperatureUniformLocation, shaderParams.TEMPERATURE);
-      gl.uniform1f(jUniformLocation, shaderParams.J);
-      gl.uniform1f(evolutionSpeedUniformLocation, shaderParams.EVOLUTION_SPEED);
-      gl.uniform1i(topologyUniformLocation, shaderParams.TOPOLOGY);
-
-      // Set up position attribute
-      gl.enableVertexAttribArray(positionAttributeLocation);
-      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-      gl.vertexAttribPointer(
-        positionAttributeLocation,
-        2,
-        gl.FLOAT,
-        false,
-        0,
-        0
-      );
-
-      // Set uniforms
-      gl.uniform1f(timeUniformLocation, time);
-      gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
-
-      // Bind the current texture as input
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, textureRef.current[currentIdx]);
-      gl.uniform1i(previousStateLocation, 0);
-
-      // Render to the next framebuffer
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbRef.current[nextIdx]);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-      // Render to the canvas
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-
-      // Draw texture we rendered to
-      gl.bindTexture(gl.TEXTURE_2D, textureRef.current[nextIdx]);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-      // Swap buffers for next frame
-      currentBufferRef.current = nextIdx;
-
-      // Request next frame
-      animationFrameId.current = requestAnimationFrame(render);
-    };
-
-    // Start rendering
-    render();
-
-    // Cleanup
-    return () => {
-      window.removeEventListener("resize", resizeCanvas);
-      cancelAnimationFrame(animationFrameId.current);
-
-      // Ensure no pending frames are left
-      gl.finish();
-
-      // Clean up WebGL resources
-      if (gl) {
-        gl.deleteProgram(program);
-        gl.deleteShader(vertexShader);
-        gl.deleteShader(fragmentShader);
-        gl.deleteBuffer(positionBuffer);
-
-        // Clean up ping-pong resources
-        if (textureRef.current[0]) gl.deleteTexture(textureRef.current[0]);
-        if (textureRef.current[1]) gl.deleteTexture(textureRef.current[1]);
-        if (fbRef.current[0]) gl.deleteFramebuffer(fbRef.current[0]);
-        if (fbRef.current[1]) gl.deleteFramebuffer(fbRef.current[1]);
-      }
-    };
+    texturesRef.current = { textures, framebuffers };
   };
 
-  // Handle WebGL context loss and restoration
-  useEffect(() => {
+  // Handle resize to keep canvas dimensions in sync
+  const handleResize = (): void => {
+    if (!canvasRef.current || !glRef.current) return;
+
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const gl = glRef.current;
 
-    const handleContextLost = (event: Event) => {
-      event.preventDefault();
-      console.warn("WebGL context lost");
-      cancelAnimationFrame(animationFrameId.current);
-    };
+    const dpr = window.devicePixelRatio || 1;
 
-    const handleContextRestored = () => {
-      console.log("WebGL context restored");
-      initializeWebGL();
-    };
+    const displayWidth = Math.floor(canvas.clientWidth * dpr);
+    const displayHeight = Math.floor(canvas.clientHeight * dpr);
 
-    canvas.addEventListener("webglcontextlost", handleContextLost);
-    canvas.addEventListener("webglcontextrestored", handleContextRestored);
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+
+      const { textures, framebuffers } = texturesRef.current;
+      textures.forEach((texture) => gl.deleteTexture(texture));
+      framebuffers.forEach((fbo) => gl.deleteFramebuffer(fbo));
+
+      initTextures(gl, displayWidth, displayHeight);
+
+      gl.viewport(0, 0, displayWidth, displayHeight);
+    }
+  };
+
+  const render = (timestamp: number): void => {
+    if (!canvasRef.current || !glRef.current || !programRef.current) return;
+
+    const canvas = canvasRef.current;
+    const gl = glRef.current;
+    const program = programRef.current;
+    const { textures, framebuffers } = texturesRef.current;
+
+    handleResize();
+
+    const displayWidth = canvas.width;
+    const displayHeight = canvas.height;
+
+    previousTimeRef.current = timestamp;
+
+    // Run multiple iterations per frame based on speed
+    for (let step = 0; step < speed; step++) {
+      const nextIteration = iterationRef.current + 1;
+      iterationRef.current = nextIteration;
+
+      // Set which textures to use for this iteration
+      const sourceIndex = iterationRef.current % 2;
+      const targetIndex = (iterationRef.current + 1) % 2;
+
+      gl.useProgram(program);
+
+      // Set uniform values
+      const u_resolution = gl.getUniformLocation(program, "u_resolution");
+      gl.uniform2f(u_resolution, displayWidth, displayHeight);
+
+      const u_coupling = gl.getUniformLocation(program, "u_coupling");
+      gl.uniform1f(u_coupling, coupling);
+
+      const u_field = gl.getUniformLocation(program, "u_field");
+      gl.uniform1f(u_field, field);
+
+      const u_temperature = gl.getUniformLocation(program, "u_temperature");
+      gl.uniform1f(u_temperature, temperature);
+
+      const u_iteration = gl.getUniformLocation(program, "u_iteration");
+      gl.uniform1f(u_iteration, iterationRef.current % 2);
+
+      const u_random_seed = gl.getUniformLocation(program, "u_random_seed");
+      gl.uniform1f(u_random_seed, Math.random());
+
+      const a_position = gl.getAttribLocation(program, "a_position");
+      gl.enableVertexAttribArray(a_position);
+      gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
+
+      const u_spin = gl.getUniformLocation(program, "u_spin");
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, textures[sourceIndex]);
+      gl.uniform1i(u_spin, 0);
+
+      // First pass: Compute new spin states
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[targetIndex]);
+      gl.viewport(0, 0, displayWidth, displayHeight);
+
+      const u_pass = gl.getUniformLocation(program, "u_pass");
+      gl.uniform1f(u_pass, 0.0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      // Second pass: Render to screen
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, displayWidth, displayHeight);
+
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, textures[targetIndex]);
+      gl.uniform1i(u_spin, 0);
+
+      gl.uniform1f(u_pass, 1.0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    requestRef.current = requestAnimationFrame(render);
+  };
+
+  useEffect(() => {
+    if (canvasRef.current) {
+      const success = initWebGL();
+
+      if (success) {
+        handleResize();
+        window.addEventListener("resize", handleResize);
+        requestRef.current = requestAnimationFrame(render);
+      }
+    }
 
     return () => {
-      canvas.removeEventListener("webglcontextlost", handleContextLost);
-      canvas.removeEventListener("webglcontextrestored", handleContextRestored);
+      window.removeEventListener("resize", handleResize);
+
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+      }
+
+      if (glRef.current) {
+        const gl = glRef.current;
+        const { textures, framebuffers } = texturesRef.current;
+
+        textures.forEach((texture) => gl.deleteTexture(texture));
+        framebuffers.forEach((fbo) => gl.deleteFramebuffer(fbo));
+
+        if (programRef.current) {
+          gl.deleteProgram(programRef.current);
+        }
+      }
     };
   }, []);
-
-  // Initialize WebGL on mount
-  useEffect(() => {
-    initializeWebGL();
-  }, [shaderParams]);
 
   return (
     <div
@@ -405,21 +336,8 @@ function Canvas() {
       style={{ zIndex: 0 }}
     >
       <canvas ref={canvasRef} className="w-full h-full" />
-      <div className="absolute bottom-4 left-4 bg-white p-2 rounded shadow text-sm">
-        <div>Temperature: {shaderParams.TEMPERATURE.toFixed(1)}</div>
-        <div>Coupling (J): {shaderParams.J.toFixed(1)}</div>
-        <div>Speed: {shaderParams.EVOLUTION_SPEED.toFixed(1)}</div>
-        <div>
-          Topology:{" "}
-          {
-            ["Square", "Triangular", "Hexagonal", "Small-world", "Random"][
-              shaderParams.TOPOLOGY
-            ]
-          }
-        </div>
-      </div>
     </div>
   );
-}
+};
 
-export default Canvas;
+export default IsingModelSimulation;

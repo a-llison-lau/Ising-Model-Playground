@@ -2,7 +2,7 @@ precision mediump float;
 
 uniform float time;
 uniform vec2 resolution;
-uniform sampler2D previousState; // Need to add this as a feedback texture
+uniform sampler2D previousState;
 
 // Parameters for the Ising model
 uniform float TEMPERATURE;      // Temperature parameter (higher = more randomness)
@@ -11,21 +11,18 @@ const int GRID_SIZE = 2048;     // Number of cells along the shorter dimension
 uniform float EVOLUTION_SPEED;  // Speed of the simulation
 uniform int TOPOLOGY;
 
-// Improved hash function for better randomness
 float hash(vec2 p) {
   p = fract(p * vec2(123.45, 678.90));
   p += dot(p, p + 45.32);
   return fract(p.x * p.y);
 }
 
-// Better random function that uses time seed
 float random(vec2 pos, float timeSeed) {
   return hash(pos + vec2(timeSeed * 13.37, timeSeed * 7.77));
 }
 
 // Get a long-range connection based on position
 vec2 getLongRangeConnection(vec2 pos, vec2 size) {
-  // Use deterministic but seemingly random connection
   float h = hash(pos * 43.21);
   
   // Random offset between -size/3 and +size/3
@@ -38,7 +35,6 @@ vec2 getLongRangeConnection(vec2 pos, vec2 size) {
   if (abs(offset.x) < 2.0) offset.x = sign(offset.x) * 2.0;
   if (abs(offset.y) < 2.0) offset.y = sign(offset.y) * 2.0;
   
-  // Apply offset and wrap around grid boundaries
   return vec2(
     mod(pos.x + offset.x, size.x),
     mod(pos.y + offset.y, size.y)
@@ -49,13 +45,11 @@ vec2 getLongRangeConnection(vec2 pos, vec2 size) {
 float getCurrentSpin(vec2 pos, vec2 size) {
   vec2 texCoord = pos / size;
   vec4 texColor = texture2D(previousState, texCoord);
-  // Extract spin from the texture (-1 or 1)
   return texColor.r * 2.0 - 1.0;
 }
 
 // Initialize spin if we're on the first frame
 float initializeSpin(vec2 pos, float timeSeed) {
-  // Use time seed to get different initializations on different runs
   float r = random(pos, timeSeed);
   return r < 0.5 ? -1.0 : 1.0;
 }
@@ -150,18 +144,12 @@ float getNeighborSum(vec2 pos, vec2 size) {
 
 // Evolve the Ising model using the Metropolis algorithm
 float evolveSpin(vec2 pos, vec2 size, float timeSeed) {
-  // Get current spin value
   float currentSpin = getCurrentSpin(pos, size);
   
-  // Get sum of neighboring spins
   float neighborSum = getNeighborSum(pos, size);
-  
-  // Calculate current energy
   float currentEnergy = -J * currentSpin * neighborSum;
-  
-  // Energy if spin were flipped
-  float flippedEnergy = J * currentSpin * neighborSum;
-  
+  // Fix the type mismatch by using -1.0 (float) instead of -1 (int)
+  float flippedEnergy = -1.0 * currentEnergy;
   float energyDiff = flippedEnergy - currentEnergy;
   float r = random(pos, timeSeed);
   
@@ -192,7 +180,7 @@ void main() {
   float timeSeed = time * 0.5; // Base time seed
   
   // Calculate update frequency based on evolution speed
-  // We'll update at discrete time steps but interpolate between them
+  // Update at discrete time steps but interpolate between them
   float updateFrequency = 1.0 / max(0.05, 0.5 / EVOLUTION_SPEED);
   int currentUpdateStep = int(floor(time / updateFrequency));
   int nextUpdateStep = currentUpdateStep + 1;
@@ -220,15 +208,13 @@ void main() {
     float frameTimeSeed = float(currentUpdateStep) * 0.74321 + timeSeed;
     spin = evolveSpin(gridPos, numCells, frameTimeSeed);
   } else {
-    // Keep the current spin
+    // Keep current spin
     spin = getCurrentSpin(gridPos, numCells);
   }
   
-  // Determine colors
   vec3 upColor = vec3(1.0, 1.0, 1.0);
   vec3 downColor = vec3(0.0, 0.0, 0.0);
   
-  // Apply spin color
   vec3 color = mix(downColor, upColor, spin * 0.5 + 0.5);
   
   // Visualize hexagonal pattern for hexagonal lattice (subtle effect)

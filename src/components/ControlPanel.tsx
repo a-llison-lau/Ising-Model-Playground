@@ -35,7 +35,7 @@ function ControlPanel() {
 
       // Add sliders for each parameter with sensible ranges
       gui
-        .add(params, "TEMPERATURE", 0, 5)
+        .add(params, "TEMPERATURE", -50, 100)
         .onChange((value: number) => updateShaderParams({ TEMPERATURE: value }))
         .name("Temperature");
 
